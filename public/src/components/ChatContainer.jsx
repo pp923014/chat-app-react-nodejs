@@ -11,46 +11,49 @@ export default function ChatContainer({ currentChat, socket }) {
   const scrollRef = useRef();
   const [arrivalMessage, setArrivalMessage] = useState(null);
 
-  useEffect(async () => {
-    const data = await JSON.parse(
-      localStorage.getItem(process.env.REACT_APP_LOCALHOST_KEY)
-    );
-    const response = await axios.post(recieveMessageRoute, {
-      from: data._id,
-      to: currentChat._id,
-    });
-    setMessages(response.data);
-  }, [currentChat]);
-
   useEffect(() => {
-    const getCurrentChat = async () => {
-      if (currentChat) {
-        await JSON.parse(
+    const fetchMessages = async () => {
+      try {
+        const data = await JSON.parse(
           localStorage.getItem(process.env.REACT_APP_LOCALHOST_KEY)
-        )._id;
+        );
+        const response = await axios.post(recieveMessageRoute, {
+          from: data._id,
+          to: currentChat._id,
+        });
+        setMessages(response.data);
+      } catch (error) {
+        console.error("Error fetching messages:", error);
       }
     };
-    getCurrentChat();
+    
+    if (currentChat) {
+      fetchMessages();
+    }
   }, [currentChat]);
 
   const handleSendMsg = async (msg) => {
-    const data = await JSON.parse(
-      localStorage.getItem(process.env.REACT_APP_LOCALHOST_KEY)
-    );
-    socket.current.emit("send-msg", {
-      to: currentChat._id,
-      from: data._id,
-      msg,
-    });
-    await axios.post(sendMessageRoute, {
-      from: data._id,
-      to: currentChat._id,
-      message: msg,
-    });
+    try {
+      const data = await JSON.parse(
+        localStorage.getItem(process.env.REACT_APP_LOCALHOST_KEY)
+      );
+      
+      socket.current.emit("send-msg", {
+        to: currentChat._id,
+        from: data._id,
+        msg,
+      });
+      
+      await axios.post(sendMessageRoute, {
+        from: data._id,
+        to: currentChat._id,
+        message: msg,
+      });
 
-    const msgs = [...messages];
-    msgs.push({ fromSelf: true, message: msg });
-    setMessages(msgs);
+      setMessages(prev => [...prev, { fromSelf: true, message: msg }]);
+    } catch (error) {
+      console.error("Error sending message:", error);
+    }
   };
 
   useEffect(() => {
@@ -59,6 +62,12 @@ export default function ChatContainer({ currentChat, socket }) {
         setArrivalMessage({ fromSelf: false, message: msg });
       });
     }
+
+    return () => {
+      if (socket.current) {
+        socket.current.off("msg-recieve");
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -71,37 +80,32 @@ export default function ChatContainer({ currentChat, socket }) {
 
   return (
     <Container>
-      <div className="chat-header">
-        <div className="user-details">
-          <div className="avatar">
+      <ChatHeader>
+        <UserDetails>
+          <Avatar>
             <img
               src={`data:image/svg+xml;base64,${currentChat.avatarImage}`}
-              alt=""
+              alt={currentChat.username}
             />
-          </div>
-          <div className="username">
+          </Avatar>
+          <Username>
             <h3>{currentChat.username}</h3>
-          </div>
-        </div>
+            <Status>Online</Status>
+          </Username>
+        </UserDetails>
         <Logout />
-      </div>
-      <div className="chat-messages">
-        {messages.map((message) => {
-          return (
-            <div ref={scrollRef} key={uuidv4()}>
-              <div
-                className={`message ${
-                  message.fromSelf ? "sended" : "recieved"
-                }`}
-              >
-                <div className="content ">
-                  <p>{message.message}</p>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      </ChatHeader>
+      
+      <MessagesContainer>
+        {messages.map((message) => (
+          <MessageWrapper ref={scrollRef} key={uuidv4()}>
+            <MessageBubble $isSelf={message.fromSelf}>
+              <MessageContent>{message.message}</MessageContent>
+            </MessageBubble>
+          </MessageWrapper>
+        ))}
+      </MessagesContainer>
+      
       <ChatInput handleSendMsg={handleSendMsg} />
     </Container>
   );
@@ -109,73 +113,93 @@ export default function ChatContainer({ currentChat, socket }) {
 
 const Container = styled.div`
   display: grid;
-  grid-template-rows: 10% 80% 10%;
-  gap: 0.1rem;
-  overflow: hidden;
-  @media screen and (min-width: 720px) and (max-width: 1080px) {
-    grid-template-rows: 15% 70% 15%;
+  grid-template-rows: 80px 1fr 80px;
+  height: 100%;
+  background: #0f0f1a;
+  border-left: 1px solid #2d2d42;
+`;
+
+const ChatHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 2rem;
+  background: #1a1a2e;
+  border-bottom: 1px solid #2d2d42;
+`;
+
+const UserDetails = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+`;
+
+const Avatar = styled.div`
+  img {
+    height: 3.5rem;
+    width: 3.5rem;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid #4e0eff;
   }
-  .chat-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0 2rem;
-    .user-details {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      .avatar {
-        img {
-          height: 3rem;
-        }
-      }
-      .username {
-        h3 {
-          color: white;
-        }
-      }
-    }
+`;
+
+const Username = styled.div`
+  h3 {
+    color: white;
+    margin: 0;
+    font-size: 1.2rem;
   }
-  .chat-messages {
-    padding: 1rem 2rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    overflow: auto;
-    &::-webkit-scrollbar {
-      width: 0.2rem;
-      &-thumb {
-        background-color: #ffffff39;
-        width: 0.1rem;
-        border-radius: 1rem;
-      }
-    }
-    .message {
-      display: flex;
-      align-items: center;
-      .content {
-        max-width: 40%;
-        overflow-wrap: break-word;
-        padding: 1rem;
-        font-size: 1.1rem;
-        border-radius: 1rem;
-        color: #d1d1d1;
-        @media screen and (min-width: 720px) and (max-width: 1080px) {
-          max-width: 70%;
-        }
-      }
-    }
-    .sended {
-      justify-content: flex-end;
-      .content {
-        background-color: #4f04ff21;
-      }
-    }
-    .recieved {
-      justify-content: flex-start;
-      .content {
-        background-color: #9900ff20;
-      }
-    }
+`;
+
+const Status = styled.span`
+  color: #4e0eff;
+  font-size: 0.8rem;
+  font-weight: 500;
+`;
+
+const MessagesContainer = styled.div`
+  padding: 1.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  overflow-y: auto;
+  
+  &::-webkit-scrollbar {
+    width: 6px;
   }
+  
+  &::-webkit-scrollbar-thumb {
+    background-color: #4e0eff;
+    border-radius: 3px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background-color: #1a1a2e;
+  }
+`;
+
+const MessageWrapper = styled.div`
+  display: flex;
+`;
+
+const MessageBubble = styled.div`
+  max-width: 60%;
+  padding: 0.8rem 1.2rem;
+  border-radius: 1.2rem;
+  font-size: 1rem;
+  line-height: 1.4;
+  color: #e6e6e6;
+  background: ${props => props.$isSelf ? '#4e0eff' : '#2d2d42'};
+  align-self: ${props => props.$isSelf ? 'flex-end' : 'flex-start'};
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  word-wrap: break-word;
+  
+  @media (max-width: 768px) {
+    max-width: 80%;
+  }
+`;
+
+const MessageContent = styled.p`
+  margin: 0;
 `;
